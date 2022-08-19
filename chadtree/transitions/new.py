@@ -33,7 +33,9 @@ def _new(
     if not node:
         return None
     else:
-        parent = node.path if is_dir(node) else node.path.parent
+        parent = node.path.parent
+        if is_dir(node) and node.path in state.index:
+            parent = node.path
 
         child = ask(nvim, question=LANG("pencil"), default="")
 
