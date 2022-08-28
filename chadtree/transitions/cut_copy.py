@@ -25,8 +25,10 @@ from .shared.wm import kill_buffers
 from .types import Stage
 
 
-def _find_dest(src: PurePath, node: Node) -> PurePath:
-    parent = node.path if is_dir(node) else node.path.parent
+def _find_dest(src: PurePath, state: State, node: Node) -> PurePath:
+    parent = node.path.parent
+    if is_dir(node) and node.path in state.index:
+        parent = node.path
     dst = parent / src.name
     return dst
 
@@ -53,7 +55,7 @@ def _operation(
         write(nvim, LANG("operation not permitted on root"), error=True)
         return None
     else:
-        pre_operations = {src: _find_dest(src, node) for src in unified}
+        pre_operations = {src: _find_dest(src, state, node) for src in unified}
         pre_existing = {
             s: d for s, d in pre_operations.items() if exists(d, follow=False)
         }
