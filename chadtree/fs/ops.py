@@ -1,6 +1,7 @@
-from asyncio import gather
+from asyncio import Lock, gather
 from dataclasses import dataclass
 from datetime import datetime
+from functools import lru_cache
 from os import makedirs, readlink
 from os import remove as rm
 from os import stat
@@ -9,6 +10,7 @@ from pathlib import Path, PurePath
 from shutil import copy2, copytree
 from shutil import move as mv
 from shutil import rmtree
+from shutil import which as _which
 from stat import S_ISDIR, S_ISLNK, filemode
 from typing import AbstractSet, Iterable, Mapping, Optional
 
@@ -37,6 +39,11 @@ class FSstat:
     link: Optional[str]
 
 
+@lru_cache(maxsize=None)
+def lock() -> Lock:
+    return Lock()
+
+
 try:
     from grp import getgrgid
     from pwd import getpwuid
@@ -60,6 +67,14 @@ except ImportError:
 
     def _get_groupname(gid: int) -> str:
         return str(gid)
+
+
+@lru_cache(maxsize=None)
+def which(path: PurePath) -> Optional[PurePath]:
+    if bin := _which(path):
+        return PurePath(bin)
+    else:
+        return None
 
 
 async def fs_stat(path: PurePath) -> FSstat:
@@ -99,12 +114,14 @@ async def exists(path: PurePath, follow: bool) -> bool:
 async def exists_many(
     paths: Iterable[PurePath], follow: bool
 ) -> Mapping[PurePath, bool]:
-    existance = await gather(*(exists(path, follow=follow) for path in paths))
+    async with lock():
+        existance = await gather(*(exists(path, follow=follow) for path in paths))
     return {path: exi for path, exi in zip(paths, existance)}
 
 
 async def is_file(path: PurePath) -> bool:
-    return await to_thread(lambda: isfile(path))
+    async with lock():
+        return await to_thread(lambda: isfile(path))
 
 
 async def _mkdir(path: PurePath) -> None:
@@ -127,7 +144,8 @@ async def _new(path: PurePath) -> None:
 
 
 async def new(paths: Iterable[PurePath]) -> None:
-    await gather(*map(_new, paths))
+    async with lock():
+        await gather(*map(_new, paths))
 
 
 async def _rename(src: PurePath, dst: PurePath) -> None:
@@ -139,7 +157,8 @@ async def _rename(src: PurePath, dst: PurePath) -> None:
 
 
 async def rename(operations: Mapping[PurePath, PurePath]) -> None:
-    await gather(*(_rename(src, dst) for src, dst in operations.items()))
+    async with lock():
+        await gather(*(_rename(src, dst) for src, dst in operations.items()))
 
 
 async def _remove(path: PurePath) -> None:
@@ -154,7 +173,8 @@ async def _remove(path: PurePath) -> None:
 
 
 async def remove(paths: Iterable[PurePath]) -> None:
-    await gather(*map(_remove, paths))
+    async with lock():
+        await gather(*map(_remove, paths))
 
 
 async def _cut(src: PurePath, dest: PurePath) -> None:
@@ -165,7 +185,8 @@ async def _cut(src: PurePath, dest: PurePath) -> None:
 
 
 async def cut(operations: Mapping[PurePath, PurePath]) -> None:
-    await gather(*(_cut(src, dst) for src, dst in operations.items()))
+    async with lock():
+        await gather(*(_cut(src, dst) for src, dst in operations.items()))
 
 
 async def _copy(src: PurePath, dst: PurePath) -> None:
@@ -180,4 +201,5 @@ async def _copy(src: PurePath, dst: PurePath) -> None:
 
 
 async def copy(operations: Mapping[PurePath, PurePath]) -> None:
-    await gather(*(_copy(src, dst) for src, dst in operations.items()))
+    async with lock():
+        await gather(*(_copy(src, dst) for src, dst in operations.items()))
