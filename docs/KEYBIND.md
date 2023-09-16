@@ -246,6 +246,20 @@ Clear filter.
 
 ---
 
+## Bookmarks
+
+##### `chadtree_settings.keymap.bookmark_goto`
+
+Goto bookmark `A-Z`.
+
+**default:**
+
+```json
+["m"]
+```
+
+---
+
 ## Selecting
 
 ##### `chadtree_settings.keymap.select`
@@ -274,7 +288,7 @@ Clear selection.
 
 ##### `chadtree_settings.keymap.new`
 
-Create new file at location under cursor. Files ending with platform specifc path seperator will be folders.
+Create new file at location under cursor. Files ending with platform specific path separator will be folders.
 
 Intermediary folders are created automatically.
 
@@ -286,6 +300,20 @@ ie. `uwu/owo/` under `unix` will create `uwu/` then `owo/` under it. Both are fo
 ["a"]
 ```
 
+##### `chadtree_settings.keymap.link`
+
+Create links at location under cursor from selection.
+
+Links are always relative.
+
+Intermediary folders are created automatically.
+
+**default:**
+
+```json
+["A"]
+```
+
 ##### `chadtree_settings.keymap.rename`
 
 Rename file under cursor.
@@ -294,6 +322,18 @@ Rename file under cursor.
 
 ```json
 ["r"]
+```
+
+##### `chadtree_settings.keymap.toggle_exec`
+
+Toggle all the `+x` bits of the selected / highlighted files.
+
+Except for directories, where `-x` will prevent reading.
+
+**default:**
+
+```json
+["X"]
 ```
 
 ##### `chadtree_settings.keymap.copy`
@@ -362,6 +402,16 @@ Toggle `follow` on and off. See `chadtree_settings.options.follow` for details.
 ["u"]
 ```
 
+##### `chadtree_settings.keymap.toggle_follow_links`
+
+Toggle `follow_links` on and off. See `chadtree_settings.options.follow_links` for details.
+
+**default:**
+
+```json
+["U"]
+```
+
 ##### `chadtree_settings.keymap.toggle_version_control`
 
 Toggle version control integration on and off
@@ -369,5 +419,5 @@ Toggle version control integration on and off
 **default:**
 
 ```json
-[]
+["i"]
 ```

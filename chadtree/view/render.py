@@ -1,9 +1,10 @@
+from collections import UserString
 from enum import IntEnum, auto
 from fnmatch import fnmatch
 from locale import strxfrm
-from os.path import sep
+from os.path import extsep, sep
 from pathlib import PurePath
-from typing import Any, Callable, Iterator, Optional, Sequence, Tuple, cast
+from typing import Any, Callable, Iterator, Optional, Sequence, Tuple, Union, cast
 
 from pynvim_pp.lib import encode
 from std2.platform import OS, os
@@ -13,7 +14,7 @@ from ..fs.cartographer import is_dir, user_ignored
 from ..fs.types import Mode, Node
 from ..nvim.types import Markers
 from ..settings.types import Settings
-from ..state.types import FilterPattern, Index, Selection
+from ..state.types import Diagnostics, FilterPattern, Index, Selection
 from ..version_ctl.types import VCStatus
 from .ops import encode_for_display
 from .types import Badge, Derived, Highlight, Sortby
@@ -24,8 +25,26 @@ class _CompVals(IntEnum):
     FILE = auto()
 
 
+_Str = Union[str, UserString]
 _Render = Tuple[str, Sequence[Highlight], Sequence[Badge]]
 _NRender = Tuple[Node, str, Sequence[Highlight], Sequence[Badge]]
+
+
+class _str(UserString):
+    def __lt__(self, _: _Str) -> bool:
+        return False
+
+    def __gt__(self, _: _Str) -> bool:
+        return True
+
+
+def _suffixx(path: PurePath) -> _Str:
+    if path.suffix:
+        return strxfrm(path.suffix)
+    elif path.stem.startswith(extsep):
+        return strxfrm(path.stem)
+    else:
+        return _str("")
 
 
 def _gen_comp(sortby: Sequence[Sortby]) -> Callable[[Node], Any]:
@@ -35,7 +54,7 @@ def _gen_comp(sortby: Sequence[Sortby]) -> Callable[[Node], Any]:
                 if sb is Sortby.is_folder:
                     yield _CompVals.FOLDER if is_dir(node) else _CompVals.FILE
                 elif sb is Sortby.ext:
-                    yield "" if is_dir(node) else strxfrm(node.path.suffix)
+                    yield "" if is_dir(node) else _suffixx(node.path)
                 elif sb is Sortby.file_name:
                     yield strxfrm(node.path.name)
                 else:
@@ -47,7 +66,8 @@ def _gen_comp(sortby: Sequence[Sortby]) -> Callable[[Node], Any]:
 
 
 def _vc_ignored(node: Node, vc: VCStatus) -> bool:
-    return not vc.ignored.isdisjoint(node.ancestors | {node.path})
+    pointer = node.pointed or node.path
+    return not vc.ignored.isdisjoint({pointer} | {*map(PurePath, pointer.parents)})
 
 
 def _gen_spacer(depth: int) -> str:
@@ -59,7 +79,9 @@ def _paint(
     index: Index,
     selection: Selection,
     markers: Markers,
+    diagnostics: Diagnostics,
     vc: VCStatus,
+    follow_links: bool,
     show_hidden: bool,
     current: Optional[PurePath],
 ) -> Callable[[Node, int], Optional[_Render]]:
@@ -113,7 +135,12 @@ def _paint(
     def gen_icon(node: Node) -> Iterator[str]:
         yield " "
         if is_dir(node):
-            yield icons.folder.open if node.path in index else icons.folder.closed
+            if node.pointed and not follow_links:
+                yield icons.link.normal
+            elif node.path in index:
+                yield icons.folder.open
+            else:
+                yield icons.folder.closed
         else:
             yield (
                 icons.name_exact.get(node.path.name, "")
@@ -141,25 +168,48 @@ def _paint(
             yield icons.link.broken
         elif Mode.link in mode:
             yield " "
-            yield icons.link.normal
+            if is_dir(node) and not follow_links:
+                yield icons.folder.closed
+            else:
+                yield icons.link.normal
 
     def gen_badges(path: PurePath) -> Iterator[Badge]:
+        l = ""
+        if diagnostic := diagnostics.get(path, {}):
+            l = " "
+            dl = len(diagnostic)
+            for idx, (severity, count) in enumerate(sorted(diagnostic.items())):
+                group = context.particular_mappings.diagnostics.get(
+                    severity, context.particular_mappings.diagnostic_unknown
+                )
+                lhs, rhs = not idx, idx + 1 == dl
+                r = " " if dl > 1 and not rhs else ""
+                if lhs:
+                    yield Badge(
+                        text="{", group=context.particular_mappings.diagnostic_context
+                    )
+                yield Badge(text=f"{count}{r}", group=group)
+                if rhs:
+                    yield Badge(
+                        text="}", group=context.particular_mappings.diagnostic_context
+                    )
+
         if marks := markers.bookmarks.get(path):
             ordered = "".join(sorted(marks))
             yield Badge(
-                text=f"<{ordered}>",
+                text=f"{l}<{ordered}>",
                 group=context.particular_mappings.bookmarks,
             )
 
         if qf_count := markers.quick_fix.get(path):
             yield Badge(
-                text=f"({qf_count})",
+                text=f"{l}({qf_count})",
                 group=context.particular_mappings.quickfix,
             )
 
         if stat := vc.status.get(path):
             yield Badge(
-                text=f" [{stat}]",
+                text=f"{l}[{stat}]",
                 group=context.particular_mappings.version_control,
             )
 
@@ -210,7 +260,9 @@ def render(
     selection: Selection,
     filter_pattern: Optional[FilterPattern],
     markers: Markers,
+    diagnostics: Diagnostics,
     vc: VCStatus,
+    follow_links: bool,
     show_hidden: bool,
     current: Optional[PurePath],
 ) -> Derived:
@@ -219,7 +271,9 @@ def render(
         index=index,
         selection=selection,
         markers=markers,
+        diagnostics=diagnostics,
         vc=vc,
+        follow_links=follow_links,
         show_hidden=show_hidden,
         current=current,
     )

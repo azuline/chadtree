@@ -1,19 +1,18 @@
 from itertools import chain
-from locale import strxfrm
 from os import linesep
 from pathlib import PurePath
 from typing import AbstractSet, Awaitable, Callable, Mapping, MutableMapping, Optional
 
 from pynvim_pp.nvim import Nvim
 from std2 import anext
+from std2.locale import pathsort_key
 
-from ..fs.cartographer import is_dir
+from ..fs.cartographer import act_like_dir
 from ..fs.ops import ancestors, copy, cut, exists, unify_ancestors
 from ..fs.types import Node
 from ..lsp.notify import lsp_created, lsp_moved
 from ..registry import rpc
 from ..settings.localization import LANG
-from ..settings.types import Settings
 from ..state.next import forward
 from ..state.types import State
 from ..view.ops import display_path
@@ -23,9 +22,14 @@ from .shared.wm import kill_buffers
 from .types import Stage
 
 
-def _find_dest(src: PurePath, state: State, node: Node) -> PurePath:
+def _find_dest(
+    src: PurePath,
+    state: State,
+    node: Node,
+    follow_links: bool = False,
+) -> PurePath:
     parent = node.path.parent
-    if is_dir(node) and node.path in state.index:
+    if act_like_dir(node, follow_links=follow_links) and node.path in state.index:
         parent = node.path
     dst = parent / src.name
     return dst
@@ -34,7 +38,6 @@ def _find_dest(src: PurePath, state: State, node: Node) -> PurePath:
 async def _operation(
     *,
     state: State,
-    settings: Settings,
     is_visual: bool,
     nono: AbstractSet[PurePath],
     op_name: str,
@@ -52,7 +55,10 @@ async def _operation(
         await Nvim.write(LANG("operation not permitted on root"), error=True)
         return None
     else:
-        pre_operations = {src: _find_dest(src, state, node) for src in unified}
+        pre_operations = {
+            src: _find_dest(src, state, node=node, follow_links=state.follow_links)
+            for src in unified
+        }
         pre_existing = {
             s: d for s, d in pre_operations.items() if await exists(d, follow=False)
         }
@@ -75,7 +81,7 @@ async def _operation(
             msg = linesep.join(
                 f"{display_path(s, state=state)} -> {display_path(d, state=state)}"
                 for s, d in sorted(
-                    pre_existing.items(), key=lambda t: strxfrm(str(t[0]))
+                    pre_existing.items(), key=lambda t: pathsort_key(t[0])
                 )
             )
             await Nvim.write(
@@ -88,7 +94,7 @@ async def _operation(
             operations = {**pre_operations, **new_operations}
             msg = linesep.join(
                 f"{display_path(s, state=state)} -> {display_path(d, state=state)}"
-                for s, d in sorted(operations.items(), key=lambda t: strxfrm(str(t[0])))
+                for s, d in sorted(operations.items(), key=lambda t: pathsort_key(t[0]))
             )
 
             question = LANG("confirm op", operation=op_name, paths=msg)
@@ -105,27 +111,22 @@ async def _operation(
                     await action(operations)
                 except Exception as e:
                     await Nvim.write(e, error=True)
-                    return await refresh(state, settings=settings)
+                    return await refresh(state)
                 else:
-                    paths = {
+                    parents = {
                         p.parent for p in chain(operations.keys(), operations.values())
                     }
-                    index = state.index | paths
+                    invalidate_dirs = parents
+                    index = state.index | parents
                     new_selection = {*operations.values()}
                     new_state = await forward(
                         state,
-                        settings=settings,
                         index=index,
-                        selection=new_selection,
-                        paths=paths,
+                        selection=new_selection if is_move else selection,
+                        invalidate_dirs=invalidate_dirs,
                     )
                     focus = next(
-                        iter(
-                            sorted(
-                                new_selection,
-                                key=lambda p: tuple(map(strxfrm, p.parts)),
-                            ),
-                        ),
+                        iter(sorted(new_selection, key=pathsort_key)),
                         None,
                     )
 
@@ -142,16 +143,15 @@ async def _operation(
 
 
 @rpc(blocking=False)
-async def _cut(state: State, settings: Settings, is_visual: bool) -> Optional[Stage]:
+async def _cut(state: State, is_visual: bool) -> Optional[Stage]:
     """
     Cut selected
     """
 
     cwd, root = await Nvim.getcwd(), state.root.path
-    nono = {cwd, root} | ancestors(cwd) | ancestors(root)
+    nono = {cwd, root} | ancestors(cwd, root)
     return await _operation(
         state=state,
-        settings=settings,
         is_visual=is_visual,
         nono=nono,
         op_name=LANG("cut"),
@@ -161,16 +161,15 @@ async def _cut(state: State, settings: Settings, is_visual: bool) -> Optional[St
 
 
 @rpc(blocking=False)
-async def _copy(state: State, settings: Settings, is_visual: bool) -> Optional[Stage]:
+async def _copy(state: State, is_visual: bool) -> Optional[Stage]:
     """
     Copy selected
     """
 
     return await _operation(
         state=state,
-        settings=settings,
         is_visual=is_visual,
-        nono=set(),
+        nono=frozenset(),
         op_name=LANG("copy"),
         action=copy,
         is_move=False,

@@ -2,10 +2,11 @@ from asyncio import Lock, gather
 from dataclasses import dataclass
 from datetime import datetime
 from functools import lru_cache
+from itertools import chain
 from os import makedirs, readlink
 from os import remove as rm
-from os import stat
-from os.path import isfile
+from os import stat, symlink
+from os.path import isdir, isfile, normpath
 from pathlib import Path, PurePath
 from shutil import copy2, copytree
 from shutil import move as mv
@@ -21,8 +22,8 @@ _FOLDER_MODE = RWXR_XR_X
 _FILE_MODE = RW_R__R__
 
 
-def ancestors(path: PurePath) -> AbstractSet[PurePath]:
-    return {p for p in PurePath(path).parents}
+def ancestors(*paths: PurePath) -> AbstractSet[PurePath]:
+    return {*chain.from_iterable(PurePath(path).parents for path in paths)}
 
 
 def unify_ancestors(paths: AbstractSet[PurePath]) -> AbstractSet[PurePath]:
@@ -99,6 +100,13 @@ async def fs_stat(path: PurePath) -> FSstat:
     return await to_thread(cont)
 
 
+async def resolve(path: PurePath, strict: bool) -> Path:
+    def cont() -> Path:
+        return Path(path).resolve(strict=strict)
+
+    return await to_thread(cont)
+
+
 async def exists(path: PurePath, follow: bool) -> bool:
     def cont() -> bool:
         try:
@@ -114,19 +122,25 @@ async def exists(path: PurePath, follow: bool) -> bool:
 async def exists_many(
     paths: Iterable[PurePath], follow: bool
 ) -> Mapping[PurePath, bool]:
-    async with lock():
-        existance = await gather(*(exists(path, follow=follow) for path in paths))
-    return {path: exi for path, exi in zip(paths, existance)}
+    existence = await gather(*(exists(path, follow=follow) for path in paths))
+    return {path: exi for path, exi in zip(paths, existence)}
+
+
+async def is_dir(path: PurePath) -> bool:
+    return await to_thread(lambda: isdir(path))
 
 
 async def is_file(path: PurePath) -> bool:
-    async with lock():
-        return await to_thread(lambda: isfile(path))
+    return await to_thread(lambda: isfile(path))
+
+
+def _mkdir_p(path: PurePath) -> None:
+    makedirs(path, mode=_FOLDER_MODE, exist_ok=True)
 
 
 async def _mkdir(path: PurePath) -> None:
     def cont() -> None:
-        makedirs(path, mode=_FOLDER_MODE, exist_ok=True)
+        _mkdir_p(path)
 
     await to_thread(cont)
 
@@ -151,7 +165,7 @@ async def new(paths: Iterable[PurePath]) -> None:
 async def _rename(src: PurePath, dst: PurePath) -> None:
     def cont() -> None:
         makedirs(dst.parent, mode=_FOLDER_MODE, exist_ok=True)
-        mv(str(src), str(dst))
+        mv(normpath(src), normpath(dst))
 
     await to_thread(cont)
 
@@ -177,9 +191,9 @@ async def remove(paths: Iterable[PurePath]) -> None:
         await gather(*map(_remove, paths))
 
 
-async def _cut(src: PurePath, dest: PurePath) -> None:
+async def _cut(src: PurePath, dst: PurePath) -> None:
     def cont() -> None:
-        mv(str(src), str(dest))
+        mv(normpath(src), normpath(dst))
 
     await to_thread(cont)
 
@@ -193,7 +207,7 @@ async def _copy(src: PurePath, dst: PurePath) -> None:
     def cont() -> None:
         stats = stat(src, follow_symlinks=False)
         if S_ISDIR(stats.st_mode):
-            copytree(src, dst)
+            copytree(src, dst, symlinks=True, dirs_exist_ok=True)
         else:
             copy2(src, dst, follow_symlinks=False)
 
@@ -203,3 +217,17 @@ async def _copy(src: PurePath, dst: PurePath) -> None:
 async def copy(operations: Mapping[PurePath, PurePath]) -> None:
     async with lock():
         await gather(*(_copy(src, dst) for src, dst in operations.items()))
+
+
+async def _link(src: PurePath, dst: PurePath) -> None:
+    def cont() -> None:
+        target_is_directory = isdir(src)
+        _mkdir_p(dst.parent)
+        symlink(normpath(src), normpath(dst), target_is_directory=target_is_directory)
+
+    await to_thread(cont)
+
+
+async def link(operations: Mapping[PurePath, PurePath]) -> None:
+    async with lock():
+        await gather(*(_link(src, dst) for dst, src in operations.items()))

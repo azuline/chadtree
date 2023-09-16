@@ -1,20 +1,20 @@
 from mimetypes import guess_type
-from os.path import altsep, normpath, sep
+from os.path import normpath
 from pathlib import PurePath
+from posixpath import sep
 from typing import AsyncContextManager, Optional, cast
 
 from pynvim_pp.buffer import Buffer
 from pynvim_pp.hold import hold_win
 from pynvim_pp.logging import log
 from pynvim_pp.nvim import Nvim
-from pynvim_pp.types import NvimError
+from pynvim_pp.rpc_types import NvimError
 from pynvim_pp.window import Window
 from std2 import anext
 from std2.aitertools import achain, to_async
 from std2.contextlib import nullacontext
 
 from ...settings.localization import LANG
-from ...settings.types import Settings
 from ...state.next import forward
 from ...state.types import State
 from ..types import ClickType, Stage
@@ -27,21 +27,17 @@ from .wm import (
 )
 
 
-async def _show_file(
-    *, state: State, settings: Settings, click_type: ClickType
-) -> None:
+async def _show_file(*, state: State, click_type: ClickType) -> None:
     if click_type is ClickType.tertiary:
         await Nvim.exec("tabnew")
         win = await Window.get_current()
-        for key, val in settings.win_actual_opts.items():
+        for key, val in state.settings.win_actual_opts.items():
             await win.opts.set(key, val=val)
 
-    path = state.current
-    if path:
-        hold = click_type is ClickType.secondary
+    if path := state.current:
         mgr = (
             cast(AsyncContextManager[None], hold_win(win=None))
-            if hold
+            if click_type is ClickType.secondary
             else nullacontext(None)
         )
         async with mgr:
@@ -62,8 +58,8 @@ async def _show_file(
                 cast(Window, None),
             ) or await new_window(
                 last_used=state.window_order,
-                win_local=settings.win_actual_opts,
-                open_left=not settings.open_left,
+                win_local=state.settings.win_actual_opts,
+                open_left=not state.settings.open_left,
                 width=None
                 if len(non_fm_windows)
                 else await Nvim.opts.get(int, "columns") - state.width - 1,
@@ -83,24 +79,24 @@ async def _show_file(
 
             win = await Window.get_current()
 
-            if buf is None:
+            if buf:
+                await win.set_buf(buf)
+            else:
                 escaped = await Nvim.fn.fnameescape(str, normpath(path))
                 await Nvim.exec(f"edit! {escaped}")
-            else:
-                await win.set_buf(buf)
 
             await resize_fm_windows(last_used=state.window_order, width=state.width)
-            try:
-                await Nvim.exec("filetype detect")
-            except NvimError as e:
-                log.warn("%s", e)
+            # try:
+            #     await Nvim.exec("filetype detect")
+            # except NvimError as e:
+            #     log.warn("%s", e)
 
 
 async def open_file(
-    state: State, settings: Settings, path: PurePath, click_type: ClickType
+    state: State, path: PurePath, click_type: ClickType
 ) -> Optional[Stage]:
     mime, _ = guess_type(path.name, strict=False)
-    m_type, _, _ = (mime or "").partition(altsep or sep)
+    m_type, _, _ = (mime or "").partition(sep)
 
     question = LANG("mime_warn", name=path.name, mime=str(mime))
 
@@ -110,13 +106,14 @@ async def open_file(
             answers=LANG("ask_yesno"),
             answer_key={1: True, 2: False},
         )
-        if m_type in settings.mime.warn and path.suffix not in settings.mime.allow_exts
+        if m_type in state.settings.mime.warn
+        and path.suffix not in state.settings.mime.allow_exts
         else True
     )
 
     if go:
-        new_state = await forward(state, settings=settings, current=path)
-        await _show_file(state=new_state, settings=settings, click_type=click_type)
+        new_state = await forward(state, current=path)
+        await _show_file(state=new_state, click_type=click_type)
         return Stage(new_state, focus=path)
     else:
         return None

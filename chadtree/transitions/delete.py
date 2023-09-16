@@ -11,7 +11,6 @@ from ..fs.ops import ancestors, remove, unify_ancestors, which
 from ..lsp.notify import lsp_removed
 from ..registry import rpc
 from ..settings.localization import LANG
-from ..settings.types import Settings
 from ..state.next import forward
 from ..state.types import State
 from ..view.ops import display_path
@@ -23,12 +22,11 @@ from .types import Stage
 
 async def _remove(
     state: State,
-    settings: Settings,
     is_visual: bool,
     yeet: Callable[[Iterable[PurePath]], Awaitable[None]],
 ) -> Optional[Stage]:
     cwd, root = await Nvim.getcwd(), state.root.path
-    nono = {cwd, root} | ancestors(cwd) | ancestors(root)
+    nono = {cwd, root} | ancestors(cwd, root)
 
     selection = state.selection or {
         node.path async for node in indices(state, is_visual=is_visual)
@@ -59,11 +57,11 @@ async def _remove(
                 await yeet(unified)
             except Exception as e:
                 await Nvim.write(e, error=True)
-                return await refresh(state, settings=settings)
+                return await refresh(state)
             else:
-                paths = {path.parent for path in unified}
+                invalidate_dirs = {path.parent for path in unified}
                 new_state = await forward(
-                    state, settings=settings, selection=set(), paths=paths
+                    state, selection=frozenset(), invalidate_dirs=invalidate_dirs
                 )
 
                 await kill_buffers(
@@ -74,12 +72,12 @@ async def _remove(
 
 
 @rpc(blocking=False)
-async def _delete(state: State, settings: Settings, is_visual: bool) -> Optional[Stage]:
+async def _delete(state: State, is_visual: bool) -> Optional[Stage]:
     """
     Delete selected
     """
 
-    return await _remove(state, settings=settings, is_visual=is_visual, yeet=remove)
+    return await _remove(state, is_visual=is_visual, yeet=remove)
 
 
 async def _sys_trash(paths: Iterable[PurePath]) -> None:
@@ -96,14 +94,9 @@ async def _sys_trash(paths: Iterable[PurePath]) -> None:
 
 
 @rpc(blocking=False)
-async def _trash(state: State, settings: Settings, is_visual: bool) -> Optional[Stage]:
+async def _trash(state: State, is_visual: bool) -> Optional[Stage]:
     """
     Delete selected
     """
 
-    return await _remove(
-        state,
-        settings=settings,
-        is_visual=is_visual,
-        yeet=_sys_trash,
-    )
+    return await _remove(state, is_visual=is_visual, yeet=_sys_trash)

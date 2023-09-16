@@ -20,6 +20,7 @@ class MimetypeOptions:
 class Settings:
     close_on_open: bool
     follow: bool
+    follow_links: bool
     ignores: Ignored
     keymap: Mapping[str, AbstractSet[str]]
     lang: Optional[str]
@@ -27,6 +28,7 @@ class Settings:
     open_left: bool
     page_increment: int
     polling_rate: float
+    idle_timeout: float
     profiling: bool
     session: bool
     show_hidden: bool
@@ -35,4 +37,5 @@ class Settings:
     width: int
     win_actual_opts: Mapping[str, Union[bool, str]]
     win_local_opts: Mapping[str, Union[bool, str]]
+    min_diagnostics_severity: int
     xdg: bool

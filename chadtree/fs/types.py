@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import IntEnum, auto, unique
 from pathlib import PurePath
-from typing import AbstractSet, Mapping, Sequence
+from typing import AbstractSet, Mapping, Optional, Sequence
 
 
 # https://github.com/coreutils/coreutils/blob/master/src/ls.c
@@ -35,8 +35,9 @@ class Mode(IntEnum):
 class Node:
     mode: AbstractSet[Mode]
     path: PurePath
+    pointed: Optional[PurePath]
     ancestors: AbstractSet[PurePath]
-    children: Mapping[PurePath, Node] = field(default_factory=dict)
+    children: Mapping[PurePath, Node]
 
 
 @dataclass(frozen=True)

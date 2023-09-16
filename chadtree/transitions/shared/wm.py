@@ -1,3 +1,4 @@
+from contextlib import suppress
 from math import inf
 from pathlib import PurePath
 from typing import (
@@ -10,24 +11,38 @@ from typing import (
     Union,
     cast,
 )
+from urllib.parse import urlsplit
 
 from pynvim_pp.atomic import Atomic
 from pynvim_pp.buffer import Buffer
 from pynvim_pp.keymap import Keymap
 from pynvim_pp.lib import resolve_path
 from pynvim_pp.nvim import Nvim
+from pynvim_pp.rpc_types import ExtData
 from pynvim_pp.tabpage import Tabpage
-from pynvim_pp.types import ExtData, NoneType
+from pynvim_pp.types import NoneType
 from pynvim_pp.window import Window
 
-from ...consts import FM_FILETYPE
+from ...consts import FM_FILETYPE, URI_SCHEME
 from ...fs.ops import ancestors
 from ...settings.types import Settings
 
 
+def _is_chadtree_buf_name(name: str) -> bool:
+    with suppress(ValueError):
+        uri = urlsplit(name)
+        return uri.scheme == URI_SCHEME
+    return False
+
+
 async def is_fm_buffer(buf: Buffer) -> bool:
     ft = await buf.filetype()
-    return ft == FM_FILETYPE
+    if ft == FM_FILETYPE:
+        return True
+    elif name := await buf.get_name():
+        return _is_chadtree_buf_name(name)
+
+    return False
 
 
 async def is_fm_window(win: Window) -> bool:
@@ -119,9 +134,10 @@ async def find_buffers_with_file(file: PurePath) -> AsyncIterator[Buffer]:
 async def find_current_buffer_path() -> Optional[PurePath]:
     buf = await Buffer.get_current()
     if name := await buf.get_name():
-        return await resolve_path(None, path=name)
-    else:
-        return None
+        if not _is_chadtree_buf_name(name):
+            return await resolve_path(None, path=name)
+
+    return None
 
 
 async def new_fm_buffer(settings: Settings) -> Buffer:

@@ -15,7 +15,8 @@ from typing import (
 
 from pynvim_pp.atomic import Atomic
 from pynvim_pp.nvim import Nvim
-from pynvim_pp.types import NoneType, RPCallable
+from pynvim_pp.rpc_types import RPCallable
+from pynvim_pp.types import NoneType
 from pynvim_pp.window import Window
 from std2.configparser import hydrate
 from std2.graphlib import merge
@@ -49,12 +50,14 @@ class _OpenDirection(Enum):
 class _UserOptions:
     close_on_open: bool
     follow: bool
+    follow_links: bool
     lang: Optional[str]
     mimetypes: MimetypeOptions
     page_increment: int
     polling_rate: SupportsFloat
     session: bool
     show_hidden: bool
+    min_diagnostics_severity: int
     version_control: VersionCtlOpts
 
 
@@ -80,6 +83,7 @@ class _UserView:
 class _UserConfig:
     keymap: Mapping[str, AbstractSet[str]]
     options: _UserOptions
+    idle_timeout: SupportsFloat
     ignore: Ignored
     view: _UserView
     theme: _UserTheme
@@ -148,10 +152,13 @@ async def initial(specs: Iterable[RPCallable]) -> Settings:
         settings = Settings(
             close_on_open=options.close_on_open,
             follow=options.follow,
+            follow_links=options.follow_links,
             ignores=config.ignore,
+            idle_timeout=float(config.idle_timeout),
             keymap=keymap,
             lang=options.lang,
             mime=options.mimetypes,
+            min_diagnostics_severity=options.min_diagnostics_severity,
             open_left=view.open_direction is _OpenDirection.left,
             page_increment=options.page_increment,
             polling_rate=float(options.polling_rate),

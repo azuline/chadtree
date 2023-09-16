@@ -102,6 +102,16 @@ CHADTree will highlight currently open file, and open all its parents.
 true
 ```
 
+#### `chadtree_settings.options.follow_links`
+
+CHADTree will follow symlinks
+
+**default:**
+
+```json
+true
+```
+
 #### `chadtree_settings.options.lang`
 
 CHADTree will guess your locale from [unix environmental variables](https://pubs.opengroup.org/onlinepubs/7908799/xbd/envvar.html).
@@ -150,6 +160,16 @@ Change how many lines `{` and `}` scroll
 
 ```json
 5
+```
+
+#### `chadtree_settings.options.min_diagnostics_severity`
+
+Lower is more severe.
+
+**default:**
+
+```json
+2
 ```
 
 #### `chadtree_settings.options.polling_rate`
@@ -238,7 +258,7 @@ Files whose full path match these [glob patterns](https://en.wikipedia.org/wiki/
 
 ### chadtree_settings.view
 
-Some options to change CHADTree's apperance
+Some options to change CHADTree's appearance
 
 #### `chadtree_settings.view.open_direction`
 
@@ -304,4 +324,3 @@ Set of window local options to for CHADTree windows
 ### chadtree_settings.theme
 
 See help docs on [themes](https://github.com/ms-jpq/chadtree/tree/chad/docs/THEME.md)
-

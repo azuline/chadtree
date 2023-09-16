@@ -1,14 +1,17 @@
+from asyncio import Task, create_task, sleep
 from itertools import chain
 from typing import Optional
 
 from pynvim_pp.nvim import Nvim
-from pynvim_pp.types import NvimError
+from pynvim_pp.rpc_types import NvimError
 from pynvim_pp.window import Window
+from std2.asyncio import cancel
+from std2.cell import RefCell
 
 from ..fs.ops import is_file
+from ..lsp.diagnostics import poll
 from ..nvim.markers import markers
 from ..registry import NAMESPACE, autocmd, rpc
-from ..settings.types import Settings
 from ..state.next import forward
 from ..state.ops import dump_session
 from ..state.types import State
@@ -16,21 +19,53 @@ from .shared.current import new_current_file, new_root
 from .shared.wm import find_current_buffer_path
 from .types import Stage
 
+_CELL = RefCell[Optional[Task]](None)
+
 
 @rpc(blocking=False)
-async def save_session(state: State, settings: Settings) -> None:
+async def _when_idle(state: State) -> None:
+    if task := _CELL.val:
+        _CELL.val = None
+        await cancel(task)
+
+    async def cont() -> None:
+        await sleep(state.settings.idle_timeout)
+        diagnostics = await poll(state.settings.min_diagnostics_severity)
+        await forward(state, diagnostics=diagnostics)
+
+    _CELL.val = create_task(cont())
+
+
+_ = autocmd("CursorHold", "CursorHoldI") << f"lua {NAMESPACE}.{_when_idle.method}()"
+
+
+@rpc(blocking=False)
+async def save_session(state: State) -> Stage:
     """
     Save CHADTree state
     """
 
-    await dump_session(state, session_store=state.session_store)
+    await dump_session(state)
+    new_state = await forward(state, vim_focus=False)
+    return Stage(new_state)
 
 
 _ = autocmd("FocusLost", "ExitPre") << f"lua {NAMESPACE}.{save_session.method}()"
 
 
 @rpc(blocking=False)
-async def _record_win_pos(state: State, settings: Settings) -> Stage:
+async def _focus_gained(state: State) -> Stage:
+    """ """
+
+    new_state = await forward(state, vim_focus=True)
+    return Stage(new_state)
+
+
+_ = autocmd("FocusGained") << f"lua {NAMESPACE}.{_focus_gained.method}()"
+
+
+@rpc(blocking=False)
+async def _record_win_pos(state: State) -> Stage:
     """
     Record last windows
     """
@@ -44,7 +79,7 @@ async def _record_win_pos(state: State, settings: Settings) -> Stage:
             (wid for wid in state.window_order if wid != win_id), (win_id,)
         )
     }
-    new_state = await forward(state, settings=settings, window_order=window_order)
+    new_state = await forward(state, window_order=window_order)
     return Stage(new_state)
 
 
@@ -52,13 +87,13 @@ _ = autocmd("WinEnter") << f"lua {NAMESPACE}.{_record_win_pos.method}()"
 
 
 @rpc(blocking=False)
-async def _changedir(state: State, settings: Settings) -> Stage:
+async def _changedir(state: State) -> Stage:
     """
     Follow cwd update
     """
 
     cwd = await Nvim.getcwd()
-    new_state = await new_root(state, settings=settings, new_cwd=cwd, indices=set())
+    new_state = await new_root(state, new_cwd=cwd, indices=frozenset())
     return Stage(new_state)
 
 
@@ -66,14 +101,14 @@ _ = autocmd("DirChanged") << f"lua {NAMESPACE}.{_changedir.method}()"
 
 
 @rpc(blocking=False)
-async def _update_follow(state: State, settings: Settings) -> Optional[Stage]:
+async def _update_follow(state: State) -> Optional[Stage]:
     """
     Follow buffer
     """
 
     try:
-        if (curr := await find_current_buffer_path()) and await is_file(curr):
-            stage = await new_current_file(state, settings=settings, current=curr)
+        if (current := await find_current_buffer_path()) and await is_file(current):
+            stage = await new_current_file(state, current=current)
             return stage
         else:
             return None
@@ -85,13 +120,13 @@ _ = autocmd("BufEnter") << f"lua {NAMESPACE}.{_update_follow.method}()"
 
 
 @rpc(blocking=False)
-async def _update_markers(state: State, settings: Settings) -> Stage:
+async def _update_markers(state: State) -> Stage:
     """
     Update markers
     """
 
     mks = await markers()
-    new_state = await forward(state, settings=settings, markers=mks)
+    new_state = await forward(state, markers=mks)
     return Stage(new_state)
 
 

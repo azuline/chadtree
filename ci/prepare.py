@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from os import environ, sep
 from pathlib import Path
 from subprocess import check_call, check_output, run
+from sys import executable
 from typing import Iterator
 
 _TOP_LV = Path(__file__).resolve(strict=True).parent.parent
@@ -17,20 +18,26 @@ def _git_identity() -> None:
 
 
 def _get_branch() -> str:
-    ref = environ["GITHUB_REF"]
-    return ref.replace("refs/heads/", "")
+    if ref := environ.get("GITHUB_REF"):
+        return ref.replace("refs/heads/", "")
+    else:
+        br = check_output(("git", "branch", "--show-current"), text=True, cwd=_TOP_LV)
+        return br.strip()
 
 
 def _git_clone(path: Path) -> None:
     if not path.is_dir():
-        token = environ["CI_TOKEN"]
-        uri = f"https://ms-jpq:{token}@github.com/ms-jpq/chadtree.git"
+        if token := environ.get("CI_TOKEN"):
+            uri = f"https://ms-jpq:{token}@github.com/ms-jpq/chadtree.git"
+        else:
+            uri = "git@github.com:ms-jpq/chadtree.git"
+
         branch = _get_branch()
         check_call(("git", "clone", "--branch", branch, uri, path))
 
 
 def _build() -> None:
-    check_call(("python3", "-m", "ci"), cwd=_TOP_LV)
+    check_call((executable, "-m", "ci"), cwd=_TOP_LV)
 
 
 def _git_alert(cwd: Path) -> None:
@@ -51,21 +58,25 @@ def _git_alert(cwd: Path) -> None:
         check_call(("git", "push", "--delete", "origin", *refs), cwd=cwd)
 
     proc = run(("git", "diff", "--exit-code"), cwd=cwd)
+    print(proc)
     if proc.returncode:
         time = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
         brname = f"{prefix}--{time}"
         check_call(("git", "checkout", "-b", brname), cwd=cwd)
         check_call(("git", "add", "."), cwd=cwd)
         check_call(("git", "commit", "-m", f"update_icons: {time}"), cwd=cwd)
-        check_call(("git", "push", "--set-upstream", "origin", brname), cwd=cwd)
+        check_call(
+            ("git", "push", "--force", "--set-upstream", "origin", brname), cwd=cwd
+        )
 
 
 def main() -> None:
     cwd = Path() / "temp"
-    _git_identity()
+    if "CI" in environ:
+        _git_identity()
     _git_clone(cwd)
     _build()
-    _git_alert(cwd)
+    _git_alert(_TOP_LV)
 
 
 main()

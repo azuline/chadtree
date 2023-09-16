@@ -6,11 +6,13 @@ from pynvim_pp.atomic import Atomic
 from pynvim_pp.buffer import Buffer
 from pynvim_pp.nvim import Nvim
 from pynvim_pp.operators import operator_marks
-from pynvim_pp.types import NoneType, NvimError
+from pynvim_pp.rpc_types import NvimError
+from pynvim_pp.types import NoneType
 from std2.difflib import trans_inplace
 from std2.pickle.decoder import new_decoder
 from std2.pickle.types import DecodeError
 
+from ..consts import URI_SCHEME
 from ..state.types import State
 from ..view.types import Derived
 from .shared.wm import find_fm_windows
@@ -33,7 +35,6 @@ def _update(
     derived: Derived,
     hashed_lines: Sequence[str],
 ) -> Atomic:
-
     atomic = Atomic()
     for (i1, i2), (j1, j2) in trans_inplace(
         src=hashed_lines, dest=derived.hashed, unifying=10
@@ -101,9 +102,24 @@ async def redraw(state: State, focus: Optional[PurePath]) -> None:
         a3.call_function("setpos", ("'<", (buf.number, r1 + 1, c1 + 1, 0)))
         a3.call_function("setpos", ("'>", (buf.number, r2 + 1, c2, 0)))
         if new_row is not None:
+            win_height = await win.get_height()
+            win_lo = await Nvim.fn.line(int, "w0", win)
+            win_hi = await Nvim.fn.line(int, "w$", win)
+            lo = max(1, new_row - win_height // 2)
+            hi = min(n_count, new_row + win_height // 2)
+
+            if new_row < win_lo or new_row > win_hi:
+                a3.win_set_cursor(win, (lo, 0))
+                a3.win_set_cursor(win, (hi, 0))
+                a3.win_set_cursor(win, (lo, 0))
+                a3.win_set_cursor(win, (hi, 0))
+
             a3.win_set_cursor(win, (new_row, col))
 
+        # a3.buf_set_name(buf, f"#{URI_SCHEME}://{state.root.path}")
+
+        a4 = a1 + a2 + a3
         try:
-            await (a1 + a2 + a3).commit(NoneType)
+            await a4.commit(NoneType)
         except NvimError as e:
             raise UnrecoverableError(e)

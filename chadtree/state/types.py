@@ -2,15 +2,18 @@ from dataclasses import dataclass
 from pathlib import Path, PurePath
 from typing import AbstractSet, Mapping, Optional
 
-from pynvim_pp.types import ExtData
+from pynvim_pp.rpc_types import ExtData
 
 from ..fs.types import Node
 from ..nvim.types import Markers
+from ..settings.types import Settings
 from ..version_ctl.types import VCStatus
 from ..view.types import Derived
+from .executor import CurrentExecutor
 
 Index = AbstractSet[PurePath]
 Selection = Index
+Diagnostics = Mapping[PurePath, Mapping[int, int]]
 
 
 @dataclass(frozen=True)
@@ -19,10 +22,19 @@ class FilterPattern:
 
 
 @dataclass(frozen=True)
+class Session:
+    workdir: PurePath
+    storage: Path
+
+
+@dataclass(frozen=True)
 class State:
-    session_store: Path
+    executor: CurrentExecutor
+    settings: Settings
+    session: Session
+    follow_links: bool
+    vim_focus: bool
     current: Optional[PurePath]
-    derived: Derived
     enable_vc: bool
     filter_pattern: Optional[FilterPattern]
     follow: bool
@@ -33,11 +45,18 @@ class State:
     show_hidden: bool
     vc: VCStatus
     width: int
+    diagnostics: Diagnostics
     window_order: Mapping[ExtData, None]
+
+    @property
+    def derived(self) -> Derived:
+        raise NotImplementedError()
 
 
 @dataclass(frozen=True)
-class Session:
-    index: Optional[Index]
+class StoredSession:
+    # TODO: sync across sessions
+    # pid: int
+    index: Index
     show_hidden: Optional[bool]
     enable_vc: Optional[bool]
